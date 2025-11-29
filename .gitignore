@@ -1,0 +1,7 @@
+# ESP-IDF ignore
+/build/
+/managed_components/
+sdkconfig
+.vscode/
+*.pyc
+__pycache__/
