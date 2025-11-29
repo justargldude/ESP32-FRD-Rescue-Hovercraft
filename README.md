@@ -1,86 +1,130 @@
-# ESP32-FRD-Rescue-Hovercraft
+# ESP32-FRD: Autonomous Floating Rescue Hovercraft
 
-This project implements an autonomous floating rescue device (FRD) built on the ESP32-S3 platform. The system is designed to operate as a fast-response hovercraft capable of locating a drowning victim, navigating to the target, confirming rescue, and returning to the starting point. The architecture follows a three-tier IoT model: Device, Cloud, and Client.
+This project implements the firmware for an autonomous Unmanned Surface Vehicle (USV) designed for water rescue operations. The system is built on the ESP32-S3 platform using ESP-IDF and FreeRTOS, featuring hybrid navigation (GPS and IMU sensor fusion) and LTE-based telemetry.
 
-## 1. System Overview
+## System Architecture
 
-The FRD unit is equipped with onboard sensors, a GPS module, a digital compass, an ultrasonic module, a load cell, a 4G communication module, and a brushless propulsion system. A shore-based camera system performs AI detection and sends navigation updates to the hovercraft. The ESP32-S3 acts as the central controller, executing navigation phases and managing power.
+The architecture follows a modular structure separating hardware abstraction, sensor processing, communication layers, and high-level application control.
 
-The primary goals of the project are:
+### Hardware Specifications
 
-* Reliable autonomous operation in water environments
-* Minimal launch time through sensor and modem optimization
-* Stable communication with a cloud backend
-* Real-time monitoring and manual override from a web or mobile client
+| Component | Model | Interface |
+| :--- | :--- | :--- |
+| MCU | ESP32-S3 DevKitC-1 | - |
+| IMU | MPU-9250 | I2C |
+| GPS | NEO-M8N | UART |
+| Modem | SimCom A7682S | UART |
+| Motor | 3650 Brushless + 120A ESC | PWM |
+| Sensors | JSN-SR04T, HX711 | GPIO |
 
-## 2. Hardware Components
+### Software Stack
 
-* ESP32-S3 (central controller)
-* 4G module A7682S
-* GPS NEO-M8 (SMA antenna)
-* Compass MPU-9250
-* Load cell + HX711 amplifier
-* Ultrasonic module JSN-SR04T
-* ESC Flycolor 120A
-* Brushless motor 3650 2300KV
-* LiPo 2s 5C
-* LiPo 4S 6000mAh 150C
-* Step-down power modules
+- Framework: ESP-IDF v5.x  
+- RTOS: FreeRTOS  
+- Build System: CMake  
+- Communication: MQTT over TLS 1.2, AT Commands  
+- Control Algorithms: PID (heading), Madgwick filter (sensor fusion)
 
-## 3. Operating Phases
+## Directory Structure
 
-The system operates through six sequential phases:
+```text
+ESP32-FRD/
+├── components/
+│   ├── bsp_motor/       # Motor, ESC, PWM generation via LEDC
+│   ├── bsp_sensors/     # Ultrasonic, Load Cell, ADC drivers
+│   ├── gsm_modem/       # A7682S AT parser and MQTT state machine
+│   └── nav_system/      # NMEA parser, Madgwick filter, navigation logic
+├── main/
+│   ├── main.c           # Application entry point and scheduler
+│   ├── app_config.h     # System configuration and pin definitions
+│   └── CMakeLists.txt
+├── docs/                # Schematics, logs, test reports
+└── sdkconfig            # ESP-IDF configuration
+```
 
-1. Standby
-   The device remains in deep sleep to conserve power. GPS VBAT and the 4G module remain in low-power modes for fast wake-up.
+## Functional Description
 
-2. Alert and Dispatch
-   The shore-side AI camera detects a drowning person, computes the bearing, and sends the initial command to the FRD.
+The firmware uses a Finite State Machine (FSM) with the following states:
 
-3. Coarse Approach
-   The device navigates toward the target bearing using compass feedback. Speed is kept high. GPS updates are processed every few seconds.
+1. STANDBY  
+   The system enters deep sleep. GPS VBAT is preserved. The 4G modem runs in eDRX mode.
 
-4. Fine Approach
-   Navigation commands are received continuously from the camera server. Speed is reduced for accuracy.
+2. DISPATCH  
+   Triggered by an MQTT command containing target coordinates. The system initializes sensors and computes the initial heading.
 
-5. Rescue Confirmation
-   Load cell and ultrasonic readings are used to confirm that the victim is holding onto the device.
+3. COURSE_LOCK  
+   Long-distance navigation using GPS Course Over Ground to avoid magnetic disturbance from the motor.
 
-6. Return Home
-   The FRD returns to the initial point using GPS guidance.
+4. FINE_APPROACH  
+   Close-range navigation using fused Compass and Gyroscope data via the Madgwick filter. Ultrasonic obstacle detection is active.
 
-## 4. Software Architecture
+5. RESCUE  
+   Motor cutoff occurs when load cell threshold exceeds 15 kg. Rescue status is reported to the backend.
 
-The firmware is written using ESP-IDF and FreeRTOS. Major tasks include:
+6. RETURN_TO_HOME (RTH)  
+   Activated after mission completion or failsafe (signal loss longer than 30 s or battery voltage below 14.0 V).
 
-* Sensor acquisition task
-* Motor control and ESC handling
-* 4G communication (MQTT/HTTP)
-* GPS and compass fusion
-* System watchdog and fault handling
-* Power optimization and sleep management
+## Technical Implementation Details
 
-The backend service (Node.js or FastAPI) receives device telemetry, logs mission data, and forwards commands. The client application (ReactJS or React Native) provides real-time monitoring, control, and mission playback.
+### 1. Sensor Fusion
 
-## 5. Communication Model
+EMI from the 120A ESC affects magnetometer readings. A Madgwick filter operating at 100 Hz combines data from the accelerometer, gyroscope, and magnetometer to produce stable Euler angles during high vibration.
 
-The system follows an IoT three-tier model:
+### 2. LTE Connectivity
 
-* Device Layer: ESP32-S3 publishes sensor data and receives commands.
-* Cloud Layer: Backend server processes messages, stores logs, and performs routing.
-* Client Layer: Web/mobile interface for monitoring and control.
+A custom AT command parser with ring buffer handling is implemented to manage asynchronous UART data from the A7682S. MQTT communication is secured with TLS.
 
-Primary protocols:
+### 3. Power Management
 
-* MQTT for telemetry and instruction updates
-* HTTP for critical commands or mission start signals
+To prevent brownout resets caused by motor inrush current, logic circuits and the propulsion system are isolated on different power rails with optocouplers (6N137) between control and ESC paths.
 
-## 6. Development Goals
+## Getting Started
 
-The project is developed as a full-stack IoT system demonstrating:
+### Prerequisites
 
-* Embedded programming with ESP32-S3
-* Real-time sensor fusion and motor control
-* Cloud backend design
-* Client-side visualization and control
-* Optimization for power and response time
+- ESP-IDF v5.0 or later  
+- VS Code with Espressif extension  
+- Python 3.8+
+
+### Build & Flash
+
+1. Clone the repo:
+    
+    ```bash
+    git clone <https://github.com/justargldude/ESP32-FRD-Rescue-Hovercraft.git>
+    
+    ```
+    
+2. Configuration:
+Set your 4G APN and MQTT Broker credentials in `app_config.h` or via menuconfig.
+3. Build:
+    
+    ```bash
+    idf.py build
+    
+    ```
+    
+4. Flash:
+    
+    ```bash
+    idf.py -p COMx flash monitor
+    
+    ```
+    
+
+---
+
+## 6. Future Improvements (Roadmap)
+
+- Implement Over-The-Air (OTA) firmware updates via 4G.
+- Add SD Card logging (Blackbox) for mission replay.
+- Upgrade to Kalman Filter for better position estimation.
+
+---
+
+## Contribution
+
+- Author: Thanh Tung Bui
+- Contact: [buitung161@gmail.com](mailto:buitung161@gmail.com)
+
+---
