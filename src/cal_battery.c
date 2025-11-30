@@ -1,0 +1,259 @@
+/**
+ * @file cal_battery.c
+ * @brief Implementation of battery monitoring system
+ */
+
+#include "cal_battery.h"
+#include <stdio.h>
+#include "esp_log.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_check.h"  // For ESP_RETURN_ON_ERROR
+
+// --- PRIVATE CONFIGURATION ---
+static const char *TAG = "BSP_BATT";
+
+#define ADC_UNIT        ADC_UNIT_1
+#define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4 on most ESP32
+#define ADC_ATTEN       ADC_ATTEN_DB_2_5  // ⚠️ CRITICAL FIX: Use DB_2_5 for 2S battery!
+#define ADC_SAMPLES     10
+
+// Voltage divider (measured values)
+#define R1_VAL          98500.0f   // 100kΩ actual
+#define R2_VAL          15200.0f   // 15kΩ actual
+#define VOLT_DIV_RATIO  7.4803f    // Pre-calculated: (R1+R2)/R2
+
+// EMA filter coefficient
+#define EMA_ALPHA       0.2f
+
+// --- PRIVATE STATIC VARIABLES ---
+static adc_oneshot_unit_handle_t adc_handle = NULL;
+static adc_cali_handle_t cali_handle = NULL;
+static float voltage_filter_val = 0.0f;
+static bool is_initialized = false;
+static bool is_calibrated = false;
+
+// --- PRIVATE HELPER FUNCTIONS ---
+
+/**
+ * @brief Initialize ADC calibration scheme
+ * @return true if calibration successful, false otherwise
+ */
+static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten) {
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool cali_success = false;
+
+    ESP_LOGI(TAG, "Attempting ADC calibration...");
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    if (!cali_success) {
+        ESP_LOGI(TAG, "Trying Curve Fitting scheme");
+        adc_cali_curve_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .chan = channel,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            cali_success = true;
+            ESP_LOGI(TAG, "✓ Curve Fitting calibration OK");
+        }
+    }
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!cali_success) {
+        ESP_LOGI(TAG, "Trying Line Fitting scheme");
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id = unit,
+            .atten = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) {
+            cali_success = true;
+            ESP_LOGI(TAG, "✓ Line Fitting calibration OK");
+        }
+    }
+#endif
+
+    if (!cali_success) {
+        ESP_LOGW(TAG, "✗ Calibration failed, will use raw conversion");
+    }
+
+    cali_handle = handle;
+    return cali_success;
+}
+
+/**
+ * @brief Read raw ADC with averaging
+ * @param[out] out_raw Pointer to store averaged raw value
+ * @return ESP_OK on success
+ */
+static esp_err_t read_adc_averaged(int *out_raw) {
+    if (!is_initialized || out_raw == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    int adc_raw_sum = 0;
+    int valid_samples = 0;
+
+    for (int i = 0; i < ADC_SAMPLES; i++) {
+        int raw = 0;
+        esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &raw);
+        
+        if (ret == ESP_OK) {
+            adc_raw_sum += raw;
+            valid_samples++;
+        } else {
+            ESP_LOGW(TAG, "ADC read failed on sample %d: %s", i, esp_err_to_name(ret));
+        }
+        
+        // Small delay between samples (100us)
+        esp_rom_delay_us(100);
+    }
+
+    if (valid_samples == 0) {
+        ESP_LOGE(TAG, "All ADC reads failed!");
+        return ESP_FAIL;
+    }
+
+    *out_raw = adc_raw_sum / valid_samples;
+    return ESP_OK;
+}
+
+/**
+ * @brief Convert raw ADC to GPIO voltage in mV
+ * @param raw_adc Raw ADC value
+ * @param[out] out_mv Pointer to store voltage in mV
+ * @return ESP_OK on success
+ */
+static esp_err_t raw_to_gpio_voltage(int raw_adc, int *out_mv) {
+    if (out_mv == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (is_calibrated && cali_handle != NULL) {
+        return adc_cali_raw_to_voltage(cali_handle, raw_adc, out_mv);
+    } else {
+        // Fallback: Manual calculation for DB_2_5 (0-1250mV range)
+        *out_mv = (raw_adc * 1250) / 4095;
+        return ESP_OK;
+    }
+}
+
+// --- PUBLIC API IMPLEMENTATION ---
+
+void battery_init(void) {
+    if (is_initialized) {
+        ESP_LOGW(TAG, "Battery already initialized!");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Initializing battery monitoring system...");
+
+    // 1. Initialize ADC Unit
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = ADC_UNIT,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc_handle));
+
+    // 2. Configure Channel
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL, &config));
+
+    // 3. Initialize Calibration
+    is_calibrated = init_calibration(ADC_UNIT, ADC_CHANNEL, ADC_ATTEN);
+
+    is_initialized = true;
+    
+    ESP_LOGI(TAG, "✓ Battery monitor ready (Calibration: %s)", 
+             is_calibrated ? "YES" : "NO");
+}
+
+float battery_get_voltage(void) {
+    if (!is_initialized) {
+        ESP_LOGE(TAG, "Battery not initialized! Call battery_init() first!");
+        return 0.0f;
+    }
+
+    // 1. Read averaged raw ADC
+    int adc_raw_avg = 0;
+    if (read_adc_averaged(&adc_raw_avg) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read ADC");
+        return voltage_filter_val; // Return last known good value
+    }
+
+    // 2. Convert to GPIO voltage (mV)
+    int voltage_gpio_mv = 0;
+    if (raw_to_gpio_voltage(adc_raw_avg, &voltage_gpio_mv) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to convert ADC to voltage");
+        return voltage_filter_val;
+    }
+
+    // 3. Calculate real battery voltage through voltage divider
+    float instant_voltage = (float)voltage_gpio_mv * VOLT_DIV_RATIO / 1000.0f;
+
+    // 4. Apply EMA filter
+    if (voltage_filter_val == 0.0f) {
+        voltage_filter_val = instant_voltage; // Cold start
+    } else {
+        voltage_filter_val = (EMA_ALPHA * instant_voltage) + 
+                            ((1.0f - EMA_ALPHA) * voltage_filter_val);
+    }
+
+    return voltage_filter_val;
+}
+
+float battery_get_percentage(void) {
+    float voltage = battery_get_voltage();
+    
+    // Clamp to valid range
+    if (voltage >= BATTERY_MAX_V) return 100.0f;
+    if (voltage <= BATTERY_MIN_V) return 0.0f;
+
+    // Linear interpolation
+    float percentage = (voltage - BATTERY_MIN_V) / 
+                       (BATTERY_MAX_V - BATTERY_MIN_V) * 100.0f;
+    
+    return percentage;
+}
+
+void battery_check_health(void) {
+    float voltage = battery_get_voltage();
+    float percentage = battery_get_percentage();
+
+    if (voltage < BATTERY_CRIT_V) {
+        ESP_LOGE(TAG, "🔴 CRITICAL: %.2fV (%.1f%%) - LAND NOW!", voltage, percentage);
+        // TODO: Add emergency shutdown logic here
+    } else if (voltage < BATTERY_MIN_V) {
+        ESP_LOGW(TAG, "⚠️ LOW: %.2fV (%.1f%%) - Return to base!", voltage, percentage);
+        // TODO: Add low battery warning (LED, buzzer, etc.)
+    } else if (percentage < 20.0f) {
+        ESP_LOGW(TAG, "⚡ %.1f%% (%.2fV) - Charge soon", percentage, voltage);
+    } else {
+        ESP_LOGI(TAG, "✓ %.1f%% (%.2fV)", percentage, voltage);
+    }
+}
+
+int battery_get_raw_adc(void) {
+    if (!is_initialized) {
+        ESP_LOGE(TAG, "Battery not initialized!");
+        return -1;
+    }
+
+    int raw = 0;
+    if (read_adc_averaged(&raw) == ESP_OK) {
+        return raw;
+    }
+    return -1;
+}
