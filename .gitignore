@@ -5,3 +5,6 @@ sdkconfig
 .vscode/
 *.pyc
 __pycache__/
+
+# PlatformIO ignore
+.pio/

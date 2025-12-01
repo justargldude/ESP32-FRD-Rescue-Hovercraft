@@ -17,8 +17,8 @@
 static const char *TAG = "BSP_BATT";
 
 #define ADC_UNIT        ADC_UNIT_1
-#define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4 on most ESP32
-#define ADC_ATTEN       ADC_ATTEN_DB_2_5  // ⚠️ CRITICAL FIX: Use DB_2_5 for 2S battery!
+#define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4
+#define ADC_ATTEN       ADC_ATTEN_DB_2_5  // CRITICAL FIX: Use DB_2_5 for 2S battery!
 #define ADC_SAMPLES     10
 
 // Voltage divider (measured values)
@@ -61,7 +61,7 @@ static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t
         ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
         if (ret == ESP_OK) {
             cali_success = true;
-            ESP_LOGI(TAG, "✓ Curve Fitting calibration OK");
+            ESP_LOGI(TAG, "Curve Fitting calibration OK");
         }
     }
 #endif
@@ -77,13 +77,13 @@ static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t
         ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
         if (ret == ESP_OK) {
             cali_success = true;
-            ESP_LOGI(TAG, "✓ Line Fitting calibration OK");
+            ESP_LOGI(TAG, "Line Fitting calibration OK");
         }
     }
 #endif
 
     if (!cali_success) {
-        ESP_LOGW(TAG, "✗ Calibration failed, will use raw conversion");
+        ESP_LOGW(TAG, "Calibration failed, will use raw conversion");
     }
 
     cali_handle = handle;
@@ -105,7 +105,8 @@ static esp_err_t read_adc_averaged(int *out_raw) {
 
     for (int i = 0; i < ADC_SAMPLES; i++) {
         int raw = 0;
-        esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &raw);
+        esp_err_t ret;
+        adc_oneshot_read(adc_handle, ADC_CHANNEL, &raw);
         
         if (ret == ESP_OK) {
             adc_raw_sum += raw;
@@ -176,7 +177,7 @@ void battery_init(void) {
 
     is_initialized = true;
     
-    ESP_LOGI(TAG, "✓ Battery monitor ready (Calibration: %s)", 
+    ESP_LOGI(TAG, "Battery monitor ready (Calibration: %s)", 
              is_calibrated ? "YES" : "NO");
 }
 
@@ -233,15 +234,15 @@ void battery_check_health(void) {
     float percentage = battery_get_percentage();
 
     if (voltage < BATTERY_CRIT_V) {
-        ESP_LOGE(TAG, "🔴 CRITICAL: %.2fV (%.1f%%) - LAND NOW!", voltage, percentage);
+        ESP_LOGE(TAG, "CRITICAL: %.2fV (%.1f%%) - LAND NOW!", voltage, percentage);
         // TODO: Add emergency shutdown logic here
     } else if (voltage < BATTERY_MIN_V) {
-        ESP_LOGW(TAG, "⚠️ LOW: %.2fV (%.1f%%) - Return to base!", voltage, percentage);
+        ESP_LOGW(TAG, "LOW: %.2fV (%.1f%%) - Return to base!", voltage, percentage);
         // TODO: Add low battery warning (LED, buzzer, etc.)
     } else if (percentage < 20.0f) {
-        ESP_LOGW(TAG, "⚡ %.1f%% (%.2fV) - Charge soon", percentage, voltage);
+        ESP_LOGW(TAG, "%.1f%% (%.2fV) - Charge soon", percentage, voltage);
     } else {
-        ESP_LOGI(TAG, "✓ %.1f%% (%.2fV)", percentage, voltage);
+        ESP_LOGI(TAG, "%.1f%% (%.2fV)", percentage, voltage);
     }
 }
 

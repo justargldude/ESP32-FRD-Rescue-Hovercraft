@@ -1,7 +1,6 @@
 /**
  * @file cal_battery.h
  * @brief Battery monitoring system for 2S Li-Po (7.0V - 8.4V)
- * @author Your Name
  * @version 1.0
  */
 
