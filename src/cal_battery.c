@@ -22,9 +22,9 @@ static const char *TAG = "BSP_BATT";
 #define ADC_SAMPLES     10
 
 // Voltage divider (measured values)
-#define R1_VAL          98500.0f   // 100kΩ actual
-#define R2_VAL          15200.0f   // 15kΩ actual
-#define VOLT_DIV_RATIO  7.4803f    // Pre-calculated: (R1+R2)/R2
+#define R1_VAL          22300.0f   // 22kΩ actual
+#define R2_VAL          3340.0f   // 3.3kΩ actual
+#define VOLT_DIV_RATIO  7.6766f    // Pre-calculated: (R1+R2)/R2
 
 // EMA filter coefficient
 #define EMA_ALPHA       0.2f
@@ -105,8 +105,7 @@ static esp_err_t read_adc_averaged(int *out_raw) {
 
     for (int i = 0; i < ADC_SAMPLES; i++) {
         int raw = 0;
-        esp_err_t ret;
-        adc_oneshot_read(adc_handle, ADC_CHANNEL, &raw);
+        esp_err_t ret = adc_oneshot_read(adc_handle, ADC_CHANNEL, &raw);
         
         if (ret == ESP_OK) {
             adc_raw_sum += raw;
