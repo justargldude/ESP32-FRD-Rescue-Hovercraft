@@ -47,11 +47,9 @@ static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t
     esp_err_t ret = ESP_FAIL;
     bool cali_success = false;
 
-    ESP_LOGI(TAG, "Attempting ADC calibration...");
 
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
     if (!cali_success) {
-        ESP_LOGI(TAG, "Trying Curve Fitting scheme");
         adc_cali_curve_fitting_config_t cali_config = {
             .unit_id = unit,
             .chan = channel,
@@ -61,14 +59,12 @@ static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t
         ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
         if (ret == ESP_OK) {
             cali_success = true;
-            ESP_LOGI(TAG, "Curve Fitting calibration OK");
         }
     }
 #endif
 
 #if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
     if (!cali_success) {
-        ESP_LOGI(TAG, "Trying Line Fitting scheme");
         adc_cali_line_fitting_config_t cali_config = {
             .unit_id = unit,
             .atten = atten,
@@ -77,14 +73,9 @@ static bool init_calibration(adc_unit_t unit, adc_channel_t channel, adc_atten_t
         ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
         if (ret == ESP_OK) {
             cali_success = true;
-            ESP_LOGI(TAG, "Line Fitting calibration OK");
         }
     }
 #endif
-
-    if (!cali_success) {
-        ESP_LOGW(TAG, "Calibration failed, will use raw conversion");
-    }
 
     cali_handle = handle;
     return cali_success;
@@ -110,8 +101,6 @@ static esp_err_t read_adc_averaged(int *out_raw) {
         if (ret == ESP_OK) {
             adc_raw_sum += raw;
             valid_samples++;
-        } else {
-            ESP_LOGW(TAG, "ADC read failed on sample %d: %s", i, esp_err_to_name(ret));
         }
         
         // Small delay between samples (100us)
@@ -119,7 +108,6 @@ static esp_err_t read_adc_averaged(int *out_raw) {
     }
 
     if (valid_samples == 0) {
-        ESP_LOGE(TAG, "All ADC reads failed!");
         return ESP_FAIL;
     }
 
@@ -151,11 +139,8 @@ static esp_err_t raw_to_gpio_voltage(int raw_adc, int *out_mv) {
 
 void battery_init(void) {
     if (is_initialized) {
-        ESP_LOGW(TAG, "Battery already initialized!");
         return;
     }
-
-    ESP_LOGI(TAG, "Initializing battery monitoring system...");
 
     // 1. Initialize ADC Unit
     adc_oneshot_unit_init_cfg_t init_config = {
@@ -175,28 +160,22 @@ void battery_init(void) {
     is_calibrated = init_calibration(ADC_UNIT, ADC_CHANNEL, ADC_ATTEN);
 
     is_initialized = true;
-    
-    ESP_LOGI(TAG, "Battery monitor ready (Calibration: %s)", 
-             is_calibrated ? "YES" : "NO");
 }
 
 float battery_get_voltage(void) {
     if (!is_initialized) {
-        ESP_LOGE(TAG, "Battery not initialized! Call battery_init() first!");
         return 0.0f;
     }
 
     // 1. Read averaged raw ADC
     int adc_raw_avg = 0;
     if (read_adc_averaged(&adc_raw_avg) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read ADC");
         return voltage_filter_val; // Return last known good value
     }
 
     // 2. Convert to GPIO voltage (mV)
     int voltage_gpio_mv = 0;
     if (raw_to_gpio_voltage(adc_raw_avg, &voltage_gpio_mv) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to convert ADC to voltage");
         return voltage_filter_val;
     }
 
@@ -247,7 +226,6 @@ void battery_check_health(void) {
 
 int battery_get_raw_adc(void) {
     if (!is_initialized) {
-        ESP_LOGE(TAG, "Battery not initialized!");
         return -1;
     }
 

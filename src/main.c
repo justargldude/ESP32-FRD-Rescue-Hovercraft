@@ -10,22 +10,10 @@ void app_main(void)
 {
     battery_init();
 
-    ESP_LOGI(TAG, "System Initialized. Starting Main Loop...");
+    ESP_LOGI(TAG, "Waking FRD...");
 
     while (1) {
-        
-        float vol = battery_get_voltage();      // Lấy số Vôn
-        float pct = battery_get_percentage();   // Lấy %
-
-        // 4. HIỂN THỊ / XỬ LÝ
-        ESP_LOGI(TAG, "Main Loop: Battery = %.2f V (%.1f %%)", vol, pct);
-
-        // --- Logic điều khiển thực tế cho FRD ---
-        if (pct < 20.0) {
-            ESP_LOGW(TAG, "Low Battery! Triggering Return-to-Home...");
-            // return_to_home();
-        }
-
+        battery_check_health();
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
