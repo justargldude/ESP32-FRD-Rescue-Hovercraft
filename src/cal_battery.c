@@ -14,7 +14,7 @@
 #include "esp_check.h"  // For ESP_RETURN_ON_ERROR
 
 // --- PRIVATE CONFIGURATION ---
-static const char *TAG = "BSP_BATT";
+static const char *TAG = "CAL_BATTERY";
 
 #define ADC_UNIT        ADC_UNIT_1
 #define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4
@@ -212,13 +212,13 @@ void battery_check_health(void) {
     float percentage = battery_get_percentage();
 
     if (voltage < BATTERY_CRIT_V) {
-        ESP_LOGE(TAG, "CRITICAL: %.2fV (%.1f%%) - LAND NOW!", voltage, percentage);
+        ESP_LOGE(TAG, ": %.2fV (%.1f%%) - DANG QUAY VE", voltage, percentage);
         // TODO: Add emergency shutdown logic here
     } else if (voltage < BATTERY_MIN_V) {
-        ESP_LOGW(TAG, "LOW: %.2fV (%.1f%%) - Return to base!", voltage, percentage);
+        ESP_LOGW(TAG, "%.1f%% (%.2fV) - Chu y sac!", percentage, voltage);
         // TODO: Add low battery warning (LED, buzzer, etc.)
-    } else if (percentage < 20.0f) {
-        ESP_LOGW(TAG, "%.1f%% (%.2fV) - Charge soon", percentage, voltage);
+    } else if (voltage < 5.0f || voltage > 9.0f) {
+        ESP_LOGE(TAG, "Sai muc dien ap: %.2fV - Co the gay chay ESP32", voltage);
     } else {
         ESP_LOGI(TAG, "%.1f%% (%.2fV)", percentage, voltage);
     }
