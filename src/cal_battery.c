@@ -4,6 +4,7 @@
  */
 
 #include "cal_battery.h"
+#include <stdint.h>
 #include <stdio.h>
 #include "esp_log.h"
 #include "esp_adc/adc_oneshot.h"
@@ -15,6 +16,8 @@
 
 // --- PRIVATE CONFIGURATION ---
 static const char *TAG = "CAL_BATTERY";
+
+#define  MAX_ERROR_COUNT 20
 
 #define ADC_UNIT        ADC_UNIT_1
 #define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4
@@ -166,22 +169,27 @@ float battery_get_voltage(void) {
         return 0.0f;
     }
 
-    // 1. Read averaged raw ADC
+    // 1. Read averaged raw ADC, convert to VOL and check error
+    static int error_count = 0;
     int adc_raw_avg = 0;
-    if (read_adc_averaged(&adc_raw_avg) != ESP_OK) {
-        return voltage_filter_val; // Return last known good value
-    }
-
-    // 2. Convert to GPIO voltage (mV)
     int voltage_gpio_mv = 0;
-    if (raw_to_gpio_voltage(adc_raw_avg, &voltage_gpio_mv) != ESP_OK) {
+
+    if(read_adc_averaged(&adc_raw_avg) || raw_to_gpio_voltage(voltage_gpio_mv, &adc_raw_avg) != ESP_OK){
+        error_count++;
+        if(error_count == MAX_ERROR_COUNT){
+            ESP_LOGI(TAG, "CO LOI VOI ADC! FRD SE QUAY VE");
+            return 0.0f;
+        }
         return voltage_filter_val;
+
     }
 
-    // 3. Calculate real battery voltage through voltage divider
+    error_count = 0;
+
+    // 2. Calculate real battery voltage through voltage divider
     float instant_voltage = (float)voltage_gpio_mv * VOLT_DIV_RATIO / 1000.0f;
 
-    // 4. Apply EMA filter
+    // 3. Apply EMA filter
     if (voltage_filter_val == 0.0f ){
         voltage_filter_val = instant_voltage; // Cold start
     } else {
