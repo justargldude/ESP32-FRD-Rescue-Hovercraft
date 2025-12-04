@@ -19,7 +19,7 @@ static const char *TAG = "CAL_BATTERY";
 #define ADC_UNIT        ADC_UNIT_1
 #define ADC_CHANNEL     ADC_CHANNEL_3  // GPIO 4
 #define ADC_ATTEN       ADC_ATTEN_DB_2_5  // CRITICAL FIX: Use DB_2_5 for 2S battery!
-#define ADC_SAMPLES     10
+#define ADC_SAMPLES     50
 
 // Voltage divider (measured values)
 #define R1_VAL          22300.0f   // 22kΩ actual
@@ -27,7 +27,7 @@ static const char *TAG = "CAL_BATTERY";
 #define VOLT_DIV_RATIO  7.6766f    // Pre-calculated: (R1+R2)/R2
 
 // EMA filter coefficient
-#define EMA_ALPHA       0.2f
+#define EMA_ALPHA       0.05f
 
 // --- PRIVATE STATIC VARIABLES ---
 static adc_oneshot_unit_handle_t adc_handle = NULL;
@@ -158,7 +158,6 @@ void battery_init(void) {
 
     // 3. Initialize Calibration
     is_calibrated = init_calibration(ADC_UNIT, ADC_CHANNEL, ADC_ATTEN);
-
     is_initialized = true;
 }
 
@@ -183,7 +182,7 @@ float battery_get_voltage(void) {
     float instant_voltage = (float)voltage_gpio_mv * VOLT_DIV_RATIO / 1000.0f;
 
     // 4. Apply EMA filter
-    if (voltage_filter_val == 0.0f) {
+    if (voltage_filter_val == 0.0f ){
         voltage_filter_val = instant_voltage; // Cold start
     } else {
         voltage_filter_val = (EMA_ALPHA * instant_voltage) + 
@@ -201,9 +200,7 @@ float battery_get_percentage(void) {
     if (voltage <= BATTERY_MIN_V) return 0.0f;
 
     // Linear interpolation
-    float percentage = (voltage - BATTERY_MIN_V) / 
-                       (BATTERY_MAX_V - BATTERY_MIN_V) * 100.0f;
-    
+    float percentage = (voltage - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V) * 100.0f;
     return percentage;
 }
 
@@ -212,13 +209,14 @@ void battery_check_health(void) {
     float percentage = battery_get_percentage();
 
     if (voltage < BATTERY_CRIT_V) {
-        ESP_LOGE(TAG, ": %.2fV (%.1f%%) - DANG QUAY VE", voltage, percentage);
+        ESP_LOGE(TAG, ": %.2fV (%.1f%%) - DANG QUAY VE!", voltage, percentage);
         // TODO: Add emergency shutdown logic here
     } else if (voltage < BATTERY_MIN_V) {
-        ESP_LOGW(TAG, "%.1f%% (%.2fV) - Chu y sac!", percentage, voltage);
+        ESP_LOGW(TAG, "%.1f%% (%.2fV) - CHU Y SAC!", percentage, voltage);
         // TODO: Add low battery warning (LED, buzzer, etc.)
     } else if (voltage < 5.0f || voltage > 9.0f) {
-        ESP_LOGE(TAG, "Sai muc dien ap: %.2fV - Co the gay chay ESP32", voltage);
+        ESP_LOGE(TAG, "Sai muc dien ap: %.2fV - NGAT KET NOI PIN NGAY", voltage);
+        // TODO: Add warning (LED, buzzer, etc.)
     } else {
         ESP_LOGI(TAG, "%.1f%% (%.2fV)", percentage, voltage);
     }

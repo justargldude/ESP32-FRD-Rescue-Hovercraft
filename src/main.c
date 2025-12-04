@@ -8,6 +8,8 @@ static const char *TAG = "MAIN_APP";
 
 void app_main(void)
 {
+    battery_init();
+    
     while (1) {
         battery_check_health();
         vTaskDelay(pdMS_TO_TICKS(4000));
