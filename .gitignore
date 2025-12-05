@@ -4,7 +4,7 @@
 /managed_components/
 
 # Configuration Backups & Variants
-sdkconfig.*
+sdkconfig*
 
 # Testing & Logs
 test/

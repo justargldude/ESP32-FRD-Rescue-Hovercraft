@@ -29,17 +29,15 @@ The architecture follows a modular structure separating hardware abstraction, se
 
 ```text
 ESP32-FRD/
-├── components/
-│   ├── bsp_motor/       # Motor, ESC, PWM generation via LEDC
-│   ├── bsp_sensors/     # Ultrasonic, Load Cell, ADC drivers
-│   ├── gsm_modem/       # A7682S AT parser and MQTT state machine
-│   └── nav_system/      # NMEA parser, Madgwick filter, navigation logic
-├── main/
-│   ├── main.c           # Application entry point and scheduler
-│   ├── app_config.h     # System configuration and pin definitions
-│   └── CMakeLists.txt
-├── docs/                # Schematics, logs, test reports
-└── sdkconfig            # ESP-IDF configuration
+├── include/
+│   ├── cal_battery.h    # Battery monitor interfaces
+│   └── sys_monitor.h    # System health diagnostics
+├── src/
+│   ├── main.c           # Application entry point
+│   ├── cal_battery.c    # ADC handling, calibration & EMA filter
+│   └── sys_monitor.c    # Heap & Stack runtime diagnostics
+├── lib/                 # Private libraries (PlatformIO standard)
+└── platformio.ini       # Project configuration
 ```
 
 ## Functional Description
@@ -77,6 +75,10 @@ A custom AT command parser with ring buffer handling is implemented to manage as
 ### 3. Power Management
 
 To prevent brownout resets caused by motor inrush current, logic circuits and the propulsion system are isolated on different power rails with optocouplers (6N137) between control and ESC paths.
+
+##  4. System Health Monitoring
+
+Real-time diagnostics module (sys_monitor) tracks Heap Memory fragmentation and Watermark levels to prevent stack overflows. Battery voltage is monitored via a calibrated ADC with an Exponential Moving Average (EMA) filter to eliminate noise from motor voltage sag.
 
 ## Getting Started
 
