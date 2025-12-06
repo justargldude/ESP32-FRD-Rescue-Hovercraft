@@ -16,8 +16,8 @@ extern "C" {
 // Check schematic before changing!
 
 // Motor (ESC)
-#define PIN_MOTOR_LEFT          42
-#define PIN_MOTOR_RIGHT         41
+#define PIN_MOTOR_LEFT          13
+#define PIN_MOTOR_RIGHT         14
 
 // ADC (Battery Monitor)
 // Note: GPIO 4 maps to ADC1 Channel 3
@@ -31,6 +31,13 @@ extern "C" {
 #define BATTERY_CRIT_V  6.6f  ///< Critical - must land NOW (3.3V/cell × 2)
 
 // ==========================================================
+
+
+// Motor Speed Scale
+// Quy ước: 1.00% = 100 units.
+// Ví dụ: Muốn chạy 50.5%, truyền vào 5050.
+#define MOTOR_SCALE_FACTOR      100
+#define MOTOR_SPEED_MAX_RAW     (100 * MOTOR_SCALE_FACTOR) // = 10000
 
 
 #ifdef __cplusplus
