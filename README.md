@@ -76,7 +76,7 @@ A custom AT command parser with ring buffer handling is implemented to manage as
 
 To prevent brownout resets caused by motor inrush current, logic circuits and the propulsion system are isolated on different power rails with optocouplers (6N137) between control and ESC paths.
 
-##  4. System Health Monitoring
+###  4. System Health Monitoring
 
 Real-time diagnostics module (sys_monitor) tracks Heap Memory fragmentation and Watermark levels to prevent stack overflows. Battery voltage is monitored via a calibrated ADC with an Exponential Moving Average (EMA) filter to eliminate noise from motor voltage sag.
 

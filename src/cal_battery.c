@@ -11,7 +11,6 @@
 
 #include "cal_battery.h"
 #include <stdint.h>
-#include <stdio.h>
 #include "esp_log.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
@@ -19,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_check.h"
+#include "app_config.h"
 
 // PRIVATE CONFIGURATION
 static const char *TAG = "CAL_BATTERY";
@@ -28,7 +28,6 @@ static const char *TAG = "CAL_BATTERY";
 
 // Hardware Configuration
 #define ADC_UNIT        ADC_UNIT_1
-#define ADC_CHANNEL     ADC_CHANNEL_3      // GPIO 4
 // NOTE: Using 2.5dB attenuation (Range: 0-1250mV).
 
 #define ADC_ATTEN       ADC_ATTEN_DB_2_5   

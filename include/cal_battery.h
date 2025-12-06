@@ -14,10 +14,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-// --- CÁC NGƯỠNG PIN (Public Constants) ---
-#define BATTERY_MAX_V   8.4f  ///< Fully charged (4.2V/cell × 2)
-#define BATTERY_MIN_V   7.0f  ///< Low battery (3.5V/cell × 2)
-#define BATTERY_CRIT_V  6.6f  ///< Critical - must land NOW (3.3V/cell × 2)
 
 // --- KHAI BÁO HÀM (PUBLIC API) ---
 
