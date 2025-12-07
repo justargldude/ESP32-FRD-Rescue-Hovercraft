@@ -24,6 +24,15 @@ extern "C" {
 #define PIN_BATTERY_ADC         4   
 #define ADC_CHANNEL     ADC_CHANNEL_3 
 
+
+#define FRONT_ULTRASONIC_TRIG 12
+#define LEFT_ULTRASONIC_TRIG 10
+#define RIGHT_ULTRASONIC_TRIG 3
+
+#define FRONT_ULTRASONIC_ECHO 11
+#define LEFT_ULTRASONIC_ECHO 9
+#define RIGHT_ULTRASONIC_ECHO 8
+
 // ==========================================================
 // 2. POWER SYSTEM (2S LiPo)
 #define BATTERY_MAX_V   8.4f  ///< Fully charged (4.2V/cell × 2)

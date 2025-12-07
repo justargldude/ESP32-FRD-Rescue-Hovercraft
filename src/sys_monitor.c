@@ -31,13 +31,10 @@ void sys_mon_check_memory(void) {
 
     // Diagnostic Report
     ESP_LOGI(TAG, "========== MEMORY DIAGNOSTICS ==========");
-    
     ESP_LOGI(TAG, "Total Heap:    %6u B  (%u KB)", total_heap, total_heap / 1024);
-             
     ESP_LOGI(TAG, "Current Used:  %6u B  (%.1f%%)", used_heap, used_pct);
-             
     ESP_LOGI(TAG, "Current Free:  %6u B", free_heap);
-
+    
     // Highlight the Watermark
     ESP_LOGI(TAG, "Min Free Ever: %6u B  (Watermark)", min_free_heap); 
 

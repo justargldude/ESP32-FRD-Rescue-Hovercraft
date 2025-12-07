@@ -23,24 +23,6 @@
 // PRIVATE CONFIGURATION
 static const char *TAG = "CAL_BATTERY";
 
-// Max consecutive read errors before triggering system fault
-#define MAX_ERROR_COUNT 20
-
-// Hardware Configuration
-#define ADC_UNIT        ADC_UNIT_1
-// NOTE: Using 2.5dB attenuation (Range: 0-1250mV).
-
-#define ADC_ATTEN       ADC_ATTEN_DB_2_5   
-#define ADC_SAMPLES     50                 // Oversampling count 
-
-// Voltage Divider Config (Measured values)
-#define R1_VAL          22300.0f           // 22kΩ
-#define R2_VAL          3340.0f            // 3.3kΩ
-#define VOLT_DIV_RATIO  7.6766f            // (R1+R2)/R2
-
-// EMA Filter Coefficient
-// Tác dụng: Loại bỏ nhiễu sụt áp khi động cơ tăng tốc đột ngột.
-#define EMA_ALPHA       0.05f
 
 // PRIVATE STATIC VARIABLES
 static adc_oneshot_unit_handle_t adc_handle = NULL;
