@@ -28,7 +28,7 @@ extern "C" {
  * @note How many consecutive "spikes" are needed to confirm a real movement.
  * - 3 samples ~ 200ms delay: Good balance between stability and response.
  */
-#define FILTER_SPIKE_TOLERANCE      3      // Consecutive spikes before accepting
+#define FILTER_SPIKE_TOLERANCE      5      // Consecutive spikes before accepting
 
 /**
  * @brief Sensor Error Limit (Failsafe)

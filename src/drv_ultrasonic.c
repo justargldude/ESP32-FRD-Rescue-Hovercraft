@@ -46,12 +46,12 @@ esp_err_t ultrasonic_init(void) {
         return err;
     }
 
-    is_initialized = true;
-
     // Set all TRIG pins to LOW 
     gpio_set_level(FRONT_ULTRASONIC_TRIG, 0);
     gpio_set_level(LEFT_ULTRASONIC_TRIG, 0);
     gpio_set_level(RIGHT_ULTRASONIC_TRIG, 0);
+
+    is_initialized = true;
 
     return ESP_OK;
 }
@@ -95,7 +95,7 @@ uint16_t ultrasonic_filter_apply(uint16_t raw_distance, ultrasonic_filter_t *fil
     if (raw_distance == US_ERROR_CODE) {
         filter->error_count++;
         
-        // Too many consecutive errors - reset to safe distance
+        // Too many consecutive errors, reset to safe distance
         if (filter->error_count > FILTER_ERROR_LIMIT) {
             ESP_LOGW(TAG, "Too many sensor errors, resetting to safe distance");
             filter->last_valid_value = FILTER_SAFE_DISTANCE_MM;
@@ -121,21 +121,31 @@ uint16_t ultrasonic_filter_apply(uint16_t raw_distance, ultrasonic_filter_t *fil
     }
 
     // Calculate absolute difference
-    int16_t diff_signed = (int16_t)raw_distance - (int16_t)filter->last_valid_value;
-    uint16_t diff = (uint16_t)abs(diff_signed);
+    int16_t diff = (int16_t)raw_distance - (int16_t)filter->last_valid_value;
 
-    // Check for spike, sudden jump
+    // Check for "Jump Closer"
+    // New object detected or distance decreased significantly
+    // Update immediately for safety
+    if (diff < -FILTER_SPIKE_THRESHOLD_MM){
+        filter->last_valid_value = raw_distance;
+        filter->error_count = 0;
+        return filter->last_valid_value;
+    }
+
+    // Check for "Jump Further" 
+    // Distance increased significantly
+    // Verify multiple times
     if (diff > FILTER_SPIKE_THRESHOLD_MM) {
         filter->error_count++;
-
-        // Persistent change detected - accept new value
-        if (filter->error_count >= FILTER_SPIKE_TOLERANCE) {
+        
+        // Only accept the new "far" value if it persists
+        if (filter->error_count >= FILTER_SPIKE_TOLERANCE){
             filter->last_valid_value = raw_distance;
             filter->error_count = 0;
-            return raw_distance;
+            return filter->last_valid_value;
         }
-
-        // Likely noise spike - keep old value
+        
+        // Not confirmed yet -> Keep safe "close" value
         return filter->last_valid_value;
     }
 
