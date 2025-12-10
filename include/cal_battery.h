@@ -34,8 +34,6 @@ extern "C" {
 #define EMA_ALPHA       0.05f
 
 
-// --- KHAI BÁO HÀM (PUBLIC API) ---
-
 /**
  * @brief Initialize ADC, calibration and battery monitoring system
  * 

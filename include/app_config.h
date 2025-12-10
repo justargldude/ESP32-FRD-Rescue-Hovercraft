@@ -33,6 +33,9 @@ extern "C" {
 #define LEFT_ULTRASONIC_ECHO 9
 #define RIGHT_ULTRASONIC_ECHO 8
 
+#define PD_SCK_FRONT 17
+#define DOUT_FRONT 18
+
 // ==========================================================
 // 2. POWER SYSTEM (2S LiPo)
 #define BATTERY_MAX_V   8.4f  ///< Fully charged (4.2V/cell × 2)

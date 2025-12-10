@@ -6,8 +6,6 @@
 
 **ESP32-FRD** (Floating Rescue Device) is the firmware implementation for an autonomous surface vehicle designed for rapid water rescue operations. Built on the **ESP32-S3** platform using **ESP-IDF v5.5**, it features hybrid navigation (GPS/IMU fusion), LTE telemetry, and intelligent obstacle avoidance.
 
-![System Overview](https://via.placeholder.com/800x400?text=Place+Your+System+Block+Diagram+Here)
-*(Photos)*
 
 ---
 
@@ -87,7 +85,7 @@ Water surface reflections caused "ghost" readings.
 
 Motor inrush current caused brownout resets on the ESP32.
 
-  * **Solution:** Isolated power rails using **6N137 Optocouplers** and separate Buck converters for Logic (5V) and Power (12V) lines.
+  * **Solution:** Isolated power rails using **6N137 Optocouplers** and separate Buck converters for Logic and Power lines.
 
 -----
 
@@ -118,7 +116,7 @@ Motor inrush current caused brownout resets on the ESP32.
 
 -----
 
-## Safety Warning ⚠️
+## Safety Warning
 
 This device operates high-current motors (120A) in a water environment. Always test the **Failsafe (RTH)** logic in a controlled environment before open-water deployment.
 
@@ -126,5 +124,4 @@ This device operates high-current motors (120A) in a water environment. Always t
 
 **Thanh Tung Bui** - [buitung161@gmail.com](mailto:buitung161@gmail.com)
 
-```
 ```
