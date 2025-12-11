@@ -123,5 +123,3 @@ This device operates high-current motors (120A) in a water environment. Always t
 ## Author
 
 **Thanh Tung Bui** - [buitung161@gmail.com](mailto:buitung161@gmail.com)
-
-```
