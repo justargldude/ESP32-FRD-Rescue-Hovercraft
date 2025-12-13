@@ -1,3 +1,8 @@
+/**
+ * @file drv_loadcell.c
+ * @brief Implementation of HX711 Driver & Rescue Logic
+ */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include "esp_timer.h"
@@ -9,9 +14,12 @@
 #include "app_config.h"
 #include "drv_loadcell.h"
 
-static esp_err_t err;
+// DRIVER IMPLEMENTATION
 
-esp_err_t init_loadcell(loadcell_t  *sensor){
+esp_err_t loadcell_init(loadcell_t *sensor) {
+    esp_err_t err;
+
+    //  Configure SCK (Output)
     gpio_config_t conf_sck = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
@@ -19,52 +27,62 @@ esp_err_t init_loadcell(loadcell_t  *sensor){
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .pull_up_en = GPIO_PULLUP_DISABLE,
     };
+    err = gpio_config(&conf_sck);
+    if (err != ESP_OK) return err;
 
-    if (gpio_config(&conf_sck) != ESP_OK) return err;;
-
+    // Configure DOUT (Input)
     gpio_config_t conf_dout = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << sensor->pin_dout),
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE, 
     };
-
-    if (gpio_config(&conf_dout) != ESP_OK) return err;
+    err = gpio_config(&conf_dout);
+    if (err != ESP_OK) return err;
     
+    // Set Idle State
     gpio_set_level(sensor->pin_sck, 0);
 
-    for(int i=0; i<ARR_AVG_SIZE; i++) {
-        sensor->arr_avg[i] = 0; 
+    // Clean Memory (CRITICAL for Logic)
+    for(int i = 0; i < FILTER_BUFFER_SIZE; i++) {
+        sensor->filter_buffer[i] = 0; 
     }
+    sensor->buffer_head = 0;
     sensor->is_buffer_full = false;
-    sensor->head_index = 0;
-    sensor->is_ready = true;
+    
+    // Reset Logic States
+    sensor->stable_counter = 0;
     sensor->is_human_detected = false;
+    
+    sensor->last_raw_weight = 0;
+    sensor->is_collision_detected = false;
+    sensor->last_collision_time_us = 0;
+
+    sensor->is_initialized = true;
     return ESP_OK;
 }
 
 int32_t loadcell_read_raw(loadcell_t const *sensor) {
-    if (!sensor->is_ready) return LC_ERROR_CODE;
+    if (!sensor->is_initialized) return LC_ERROR_CODE;
 
     int32_t raw = 0;
     uint16_t timeout = 0;
 
-    // Chờ dữ liệu sẵn sàng
+    // Wait for Data Ready (DOUT goes LOW)
     while (gpio_get_level(sensor->pin_dout) == 1) {
         vTaskDelay(pdMS_TO_TICKS(1)); 
         timeout++;
-        if (timeout > TIME_OUT) {
-            return LC_ERROR_CODE;
-        }
+        if (timeout > LC_READ_TIMEOUT) return LC_ERROR_CODE;
     }
 
-    // Đọc 24 bit
+    // Critical Section: Bit-banging
     portDISABLE_INTERRUPTS(); 
     
+    // Read 24 bits
     for (int i = 0; i < 24; i++) {
         gpio_set_level(sensor->pin_sck, 1);
-        ets_delay_us(1);
+        ets_delay_us(1); 
         
         raw = raw << 1;
         
@@ -76,7 +94,7 @@ int32_t loadcell_read_raw(loadcell_t const *sensor) {
         ets_delay_us(1);
     }
 
-    // Xung thứ 25 (Gain 128, Channel A)
+    // Set Gain 128 (Channel A)
     gpio_set_level(sensor->pin_sck, 1);
     ets_delay_us(1);
     gpio_set_level(sensor->pin_sck, 0);
@@ -84,16 +102,17 @@ int32_t loadcell_read_raw(loadcell_t const *sensor) {
     
     portENABLE_INTERRUPTS();
 
-    // Xử lý dấu (two's complement)
-    if (raw & (1<<23)) {
+    // Handle 24-bit Sign Extension
+    if (raw & (1 << 23)) {
         raw |= HX711_SIGN_MASK;
     }
     return raw;
 }
-esp_err_t loadcell_read_average(loadcell_t *sensor, uint8_t times) {
+
+esp_err_t loadcell_read_average_raw(loadcell_t *sensor, uint8_t times) {
     if (times < 1) times = 1;
     
-    int32_t sum = 0;
+    int32_t sum = 0; 
     uint8_t valid_count = 0;
     
     for (uint8_t i = 0; i < times; i++) {
@@ -103,264 +122,161 @@ esp_err_t loadcell_read_average(loadcell_t *sensor, uint8_t times) {
             sum += raw;
             valid_count++;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(12)); // Chờ mẫu mới
+        // Small delay between samples for stability
+        vTaskDelay(pdMS_TO_TICKS(12)); 
     }
 
     if (valid_count == 0) return ESP_FAIL;
     
-    sensor->offset = (int32_t)(sum / valid_count);
-
+    sensor->offset = (sum / valid_count);
     return ESP_OK;
 }
 
-int32_t get_weight(loadcell_t *sensor) {
+int32_t loadcell_get_weight(loadcell_t *sensor) {
     int32_t raw = loadcell_read_raw(sensor);
     
     if (raw == LC_ERROR_CODE) return LC_ERROR_CODE;
 
-    // Logic: (Raw - Offset) / Scale của RIÊNG cảm biến đó
-    int32_t weight = (raw - sensor->offset) / sensor->scale_factor;
-    
-    return weight;
+    // Weight = (Raw - Tare) / Scale
+    // Cast to float for proper division, then back to int32_t
+    return (int32_t)((float)(raw - sensor->offset) / sensor->scale_factor);
 }
 
-int32_t get_smooth_weight(loadcell_t *sensor, int32_t new_weight){
-    int32_t sum = 0;
 
-    sensor->arr_avg[sensor->head_index] = new_weight;
-    sensor->head_index++;
+// LOGIC IMPLEMENTATION
 
-    if(sensor->head_index >= ARR_AVG_SIZE){
+
+int32_t loadcell_get_smooth_weight(loadcell_t *sensor, int32_t new_weight) {
+    // Returns last known average instead of corrupting the filter
+    if (new_weight == LC_ERROR_CODE) {
+        // Return last known average if we have data
+        uint8_t count = sensor->is_buffer_full ? FILTER_BUFFER_SIZE : sensor->buffer_head;
+        if (count == 0) return 0;
+        int32_t sum = 0;
+        for (int i = 0; i < count; i++) {
+            sum += sensor->filter_buffer[i];
+        }
+        return (int32_t)(sum / count);
+    }
+
+    // Overwrite oldest value in Ring Buffer
+    sensor->filter_buffer[sensor->buffer_head] = new_weight;
+    sensor->buffer_head++;
+
+    // Wrap around logic
+    if (sensor->buffer_head >= FILTER_BUFFER_SIZE) {
         sensor->is_buffer_full = true;
-        sensor->head_index = 0;
+        sensor->buffer_head = 0;
     } 
 
-    uint8_t count = sensor->is_buffer_full ? ARR_AVG_SIZE : sensor->head_index;
+    // Determine current sample size
+    // If buffer is full, divide by SIZE. If starting up, divide by current index.
+    uint8_t count = sensor->is_buffer_full ? FILTER_BUFFER_SIZE : sensor->buffer_head;
 
-    if(count==0) return new_weight;
+    if (count == 0) return new_weight;
 
-    for (int i = 0; i < count; i++ ){
-        sum += sensor->arr_avg[i];
-    }
-    return sum / count;
-}
-
-
-
-
-/*#include <stdint.h>
-#include <stdlib.h>
-#include "esp_timer.h"
-#include "driver/gpio.h"
-#include "rom/ets_sys.h"
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "drv_loadcell.h"
-
-static const char *TAG = "LOADCELL";
-static bool is_initialized = false;
-
-esp_err_t init_loadcell(loadcell_t *sensor) {
-    gpio_config_t PD_SCK = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << sensor->pin_sck),
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-    };
-
-    esp_err_t err = gpio_config(&PD_SCK);
-    if (err != ESP_OK) return err;
-
-    gpio_config_t DOUT = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << sensor->pin_dout),
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_ENABLE,  // Sửa: dùng pull-up
-    };
-
-    err = gpio_config(&DOUT);
-    if (err != ESP_OK) return err;
-    
-    gpio_set_level(sensor->pin_sck, 0);
-    
-    // Khởi tạo giá trị mặc định
-    sensor->offset = 0;
-    sensor->scale_factor = 1.0f;
-
-    is_initialized = true;
-    ESP_LOGI(TAG, "Loadcell initialized on SCK:%d DOUT:%d", 
-             sensor->pin_sck, sensor->pin_dout);
-    return ESP_OK;
-}
-
-int32_t loadcell_read_raw(loadcell_t *sensor) {
-    int32_t raw = 0;
-    uint16_t timeout = 0;
-
-    // Chờ dữ liệu sẵn sàng
-    while (gpio_get_level(sensor->pin_dout) == 1) {
-        vTaskDelay(pdMS_TO_TICKS(1)); 
-        timeout++;
-        if (timeout > TIME_OUT) {
-            ESP_LOGW(TAG, "Timeout reading sensor");
-            return LC_ERROR_CODE;
-        }
-    }
-
-    // Đọc 24 bit
-    portDISABLE_INTERRUPTS(); 
-    
-    for (int i = 0; i < 24; i++) {
-        gpio_set_level(sensor->pin_sck, 1);
-        ets_delay_us(1);
-        
-        raw = raw << 1;
-        
-        if (gpio_get_level(sensor->pin_dout)) {
-            raw |= 1;
-        }
-        
-        gpio_set_level(sensor->pin_sck, 0);
-        ets_delay_us(1);
-    }
-
-    // Xung thứ 25 (Gain 128, Channel A)
-    gpio_set_level(sensor->pin_sck, 1);
-    ets_delay_us(1);
-    gpio_set_level(sensor->pin_sck, 0);
-    ets_delay_us(1);
-    
-    portENABLE_INTERRUPTS();
-
-    // Xử lý dấu (two's complement)
-    if (raw & (1<<23)) {
-        raw |= HX711_SIGN_MASK;
-    }
-
-    return raw;
-}
-
-// Đọc trung bình nhiều lần
-int32_t loadcell_read_average(loadcell_t *sensor, uint8_t times) {
-    if (times < 1) times = 1;
-    
+    // Calculate Average
     int32_t sum = 0;
-    uint8_t valid_count = 0;
+    for (int i = 0; i < count; i++) {
+        sum += sensor->filter_buffer[i];
+    }
     
-    for (uint8_t i = 0; i < times; i++) {
-        int32_t raw = loadcell_read_raw(sensor);
-        
-        if (raw != LC_ERROR_CODE) {
-            sum += raw;
-            valid_count++;
+    return (int32_t)(sum / count);
+}
+
+void logic_detect_human(loadcell_t *left_sensor, loadcell_t *right_sensor) {
+    // Acquire Data (smooth_weight handles LC_ERROR_CODE internally)
+    int32_t raw_left = loadcell_get_weight(left_sensor);
+    int32_t smooth_left = loadcell_get_smooth_weight(left_sensor, raw_left);
+
+    int32_t raw_right = loadcell_get_weight(right_sensor);
+    int32_t smooth_right = loadcell_get_smooth_weight(right_sensor, raw_right);
+    
+    // Skip processing if sensor errors (smooth returns last known or 0)
+    bool left_valid = (raw_left != LC_ERROR_CODE);
+    bool right_valid = (raw_right != LC_ERROR_CODE);
+
+    // Process LEFT Sensor
+    if (left_valid) {
+        if (smooth_left >= THRESH_HUMAN_TRIGGER) {
+            // Accumulate confidence
+            left_sensor->stable_counter++;
+            
+            // Saturation logic: Cap the counter to prevent overflow
+            if (left_sensor->stable_counter > COUNTER_DETECT_REQ) left_sensor->stable_counter = COUNTER_DETECT_REQ;
+
+            // Trigger condition
+            if (left_sensor->stable_counter >= COUNTER_DETECT_REQ) {
+                left_sensor->is_human_detected = true;
+            }
+        } 
+        else if (smooth_left <= THRESH_HUMAN_RELEASE) { 
+            if (left_sensor->stable_counter > 0) left_sensor->stable_counter--;
+            
+            // Release condition
+            if (left_sensor->stable_counter == 0) {
+                left_sensor->is_human_detected = false;
+            }
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(12)); // Chờ mẫu mới
     }
 
-    if (valid_count == 0) return LC_ERROR_CODE;
-    
-    return (sum / valid_count);
+    // Process RIGHT Sensor
+    if (right_valid) {
+        if (smooth_right >= THRESH_HUMAN_TRIGGER) {
+            right_sensor->stable_counter++;
+            if (right_sensor->stable_counter > COUNTER_DETECT_REQ) right_sensor->stable_counter = COUNTER_DETECT_REQ;
+
+            if (right_sensor->stable_counter >= COUNTER_DETECT_REQ) {
+                right_sensor->is_human_detected = true;
+            }
+        } 
+        else if (smooth_right <= THRESH_HUMAN_RELEASE) {
+            if (right_sensor->stable_counter > 0) right_sensor->stable_counter--;
+            
+            if (right_sensor->stable_counter == 0) {
+                right_sensor->is_human_detected = false;
+            }
+        }
+    }
 }
 
-// Tare - Đặt điểm 0
-void loadcell_tare(loadcell_t *sensor) {
-    ESP_LOGI(TAG, "Taring... Remove all weight");
-    vTaskDelay(pdMS_TO_TICKS(500));
+void logic_detect_collision(loadcell_t *front_sensor) {
+    // Collision = sudden impulse force, must detect within 1 sample cycle.
+    int32_t raw = loadcell_get_weight(front_sensor);
     
-    sensor->offset = loadcell_read_average(sensor, AVG_STARTED);
-    
-    if (sensor->offset != LC_ERROR_CODE) {
-        ESP_LOGI(TAG, "Tare completed. Offset: %ld", sensor->offset);
+    // Skip if sensor error
+    if (raw == LC_ERROR_CODE) return;
+
+    // Initialize on first valid read
+    if (front_sensor->last_raw_weight == 0) {
+        front_sensor->last_raw_weight = raw;
+        return;
+    }
+
+    // Calculate Delta 
+    int32_t delta = abs(raw - front_sensor->last_raw_weight);
+
+    // Get current time for cooldown check
+    int64_t now_us = esp_timer_get_time();
+    int64_t cooldown_us = COLLISION_COOLDOWN_MS * 1000LL;
+
+    // Collision detection with cooldown
+    // Cooldown prevents multiple triggers from post-impact oscillations
+    if (delta > THRESH_COLLISION_DELTA) {
+        // Only trigger if cooldown has passed
+        if ((now_us - front_sensor->last_collision_time_us) > cooldown_us) {
+            front_sensor->is_collision_detected = true;
+            front_sensor->last_collision_time_us = now_us;
+        }
+        // If within cooldown, keep the flag but don't update timestamp
     } else {
-        ESP_LOGE(TAG, "Tare failed!");
-    }
-}
-
-// Đọc giá trị đã trừ offset (quan trọng để tính scale)
-int32_t loadcell_get_value(loadcell_t *sensor) {
-    int32_t raw = loadcell_read_average(sensor, 5);
-    
-    if (raw == LC_ERROR_CODE) return LC_ERROR_CODE;
-    
-    return (raw - sensor->offset);
-}
-
-// Hiệu chỉnh với trọng lượng đã biết
-void loadcell_calibrate(loadcell_t *sensor, float known_weight) {
-    ESP_LOGI(TAG, "=== BẮT ĐẦU HIỆU CHỈNH ===");
-    
-    // BƯỚC 1: TARE (Lấy điểm 0)
-    ESP_LOGW(TAG, ">> B1: Bỏ hết vật nặng ra khỏi cân!");
-    ESP_LOGI(TAG, "Đang chờ 3 giây...");
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    
-    // Lưu offset lúc không tải
-    loadcell_tare(sensor); 
-    ESP_LOGI(TAG, "Offset đã lưu: %ld", sensor->offset);
-
-    // BƯỚC 2: ĐO MẪU (Lấy giá trị có tải)
-    ESP_LOGW(TAG, ">> B2: Đặt vật nặng %.1f gram lên cân!", known_weight);
-    ESP_LOGI(TAG, "Đang chờ 5 giây để ổn định...");
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Chờ lâu hơn chút để kịp đặt vật
-    
-    // Đọc giá trị raw MỚI (khi đã có vật)
-    int32_t raw_with_load = loadcell_read_average(sensor, 10);
-    
-    if (raw_with_load == LC_ERROR_CODE) {
-        ESP_LOGE(TAG, "Lỗi đọc cảm biến!");
-        return;
+        // Only clear flag after cooldown expires 
+        if ((now_us - front_sensor->last_collision_time_us) > cooldown_us) {
+            front_sensor->is_collision_detected = false;
+        }
     }
 
-    // Tính giá trị chênh lệch (Delta)
-    int32_t delta = raw_with_load - sensor->offset;
-    
-    if (delta == 0) {
-        ESP_LOGE(TAG, "Lỗi: Giá trị không đổi! Có chắc đã đặt vật lên chưa?");
-        return;
-    }
-
-    // Tính Scale Factor
-    sensor->scale_factor = (float)delta / known_weight;
-    
-    ESP_LOGI(TAG, "=== KẾT QUẢ ===");
-    ESP_LOGI(TAG, "Raw (Có tải): %ld", raw_with_load);
-    ESP_LOGI(TAG, "Delta: %ld", delta);
-    ESP_LOGI(TAG, "SCALE_FACTOR TIM ĐƯỢC: %.4f", sensor->scale_factor);
-    ESP_LOGW(TAG, "Hãy copy số %.4f vào code init!", sensor->scale_factor);
+    // Store RAW value for next cycle
+    front_sensor->last_raw_weight = raw;
 }
 
-// Đặt scale thủ công
-void loadcell_set_scale(loadcell_t *sensor, float scale) {
-    sensor->scale_factor = scale;
-    ESP_LOGI(TAG, "Scale set to: %.2f", scale);
-}
-
-// Lấy trọng lượng (gram)
-float get_weight(loadcell_t *sensor) {
-    int32_t value = loadcell_get_value(sensor);
-    
-    if (value == LC_ERROR_CODE) return 0.0f;
-    
-    return (float)value / sensor->scale_factor;
-}
-
-// Debug: In ra các giá trị để quan sát
-void loadcell_debug_print(loadcell_t *sensor) {
-    int32_t raw = loadcell_read_raw(sensor);
-    
-    if (raw == LC_ERROR_CODE) {
-        ESP_LOGE(TAG, "Read error!");
-        return;
-    }
-    
-    int32_t value = raw - sensor->offset;
-    float weight = (float)value / sensor->scale_factor;
-    
-    ESP_LOGI(TAG, "RAW: %ld | OFFSET: %ld | VALUE: %ld | SCALE: %.2f | WEIGHT: %.2f g",
-             raw, sensor->offset, value, sensor->scale_factor, weight);
-}*/

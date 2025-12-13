@@ -105,7 +105,7 @@ Motor inrush current caused brownout resets on the ESP32.
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/justargldude/ESP32-FRD-Rescue-Hovercraft.git](https://github.com/justargldude/ESP32-FRD-Rescue-Hovercraft.git)
+    git clone https://github.com/justargldude/ESP32-FRD-Rescue-Hovercraft.git
     ```
 2.  Configure WiFi/LTE credentials in `menuconfig` or `app_config.h`.
 3.  Build and Flash:

@@ -15,7 +15,6 @@
 
 static const char *TAG = "DRV_US";
 static bool is_initialized = false;
-esp_err_t err;
 
 esp_err_t ultrasonic_init(void) {
     is_initialized = false;
@@ -28,7 +27,7 @@ esp_err_t ultrasonic_init(void) {
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    err = gpio_config(&conf_trig);
+    esp_err_t err = gpio_config(&conf_trig);
     if (err != ESP_OK){
         return err;
     }

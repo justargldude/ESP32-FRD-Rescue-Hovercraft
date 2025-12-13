@@ -6,43 +6,50 @@
 #include "driver/gpio.h"
 #include "drv_ultrasonic.h"
 #include "app_config.h"
+#include "drv_loadcell.h"
 
 static const char *TAG = "MAIN_APP";
 
-static ultrasonic_filter_t filter_front = {0};
+static loadcell_t filter_front = {0};
 
 void app_main(void) {
+    // 1. Khởi tạo 3 cảm biến
+    loadcell_t sensor_front = {
+        .pin_sck = PD_SCK_FRONT,
+        .pin_dout = DOUT_FRONT,
+    };
+    init_loadcell(&sensor_front);
+
     
-    // Initialize sensor
-    esp_err_t err = ultrasonic_init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "FAILED!");
-        return;
-    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
     
-    // Continuous monitoring loop
-    ultrasonic_filter_reset(&filter_front);
+    // ===== CHẾ ĐỘ HIỆU CHỈNH =====
+    // Chỉ chạy 1 LẦN để tìm SCALE_FACTOR
     
+    // Hiệu chỉnh cảm biến trước =
+    loadcell_calibrate(&sensor_front, 199.0f);
+    
+    // Hiệu chỉnh cảm biến sau trái
+    // loadcell_calibrate(&sensor_rear_left, 1000.0f);
+    
+    // Hiệu chỉnh cảm biến sau phải
+    // loadcell_calibrate(&sensor_rear_right, 1000.0f);
+    
+    // SAU KHI CÓ SCALE_FACTOR, LƯU VÀO CODE:
+    // loadcell_set_scale(&sensor_front, 420.5f);
+    // loadcell_set_scale(&sensor_rear_left, 415.2f);
+    // loadcell_set_scale(&sensor_rear_right, 418.7f);
+    
+    // ===== CHẾ ĐỘ HOẠT ĐỘNG BÌNH THƯỜNG =====
     while (1) {
-        uint16_t raw = ultrasonic_measure(
-            (gpio_num_t)FRONT_ULTRASONIC_TRIG, 
-            (gpio_num_t)FRONT_ULTRASONIC_ECHO
-        );
+        float w1 = get_weight(&sensor_front);
         
-        uint16_t distance = ultrasonic_filter_apply(raw, &filter_front);
         
-        if (raw == US_ERROR_CODE) {
-            ESP_LOGW(TAG, "Distance: ERROR (using filtered: %d mm)", distance);
-        } else {
-            // Only log if distance changed significantly (>10mm)
-            static uint16_t last_logged = 0;
-            if (abs((int16_t)(distance - last_logged)) > 10) {
-                ESP_LOGI(TAG, "Distance: %d mm (%.2f cm) [raw: %d mm]", 
-                         distance, distance / 10.0f, raw);
-                last_logged = distance;
-            }
-        }
+        ESP_LOGI(TAG, "Front: %.1f g", w1);
         
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // Hoặc dùng debug để xem chi tiết
+        // loadcell_debug_print(&sensor_front);
+        
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
