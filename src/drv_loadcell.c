@@ -1,4 +1,4 @@
-/*#include <stdint.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include "esp_timer.h"
 #include "driver/gpio.h"
@@ -9,11 +9,10 @@
 #include "app_config.h"
 #include "drv_loadcell.h"
 
-static bool is_initialized = false;
 static esp_err_t err;
 
-esp_err_t init_loadcell(loadcell_t *sensor){
-    gpio_config_t PD_SCK = {
+esp_err_t init_loadcell(loadcell_t  *sensor){
+    gpio_config_t conf_sck = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
         .pin_bit_mask = (1ULL << sensor->pin_sck),
@@ -21,86 +20,136 @@ esp_err_t init_loadcell(loadcell_t *sensor){
         .pull_up_en = GPIO_PULLUP_DISABLE,
     };
 
-    err = gpio_config(&PD_SCK);
-    if (err != ESP_OK) return err;
+    if (gpio_config(&conf_sck) != ESP_OK) return err;;
 
-    gpio_config_t DOUT = {
+    gpio_config_t conf_dout = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << sensor->pin_dout),
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
     };
 
-    err = gpio_config(&DOUT);
-    if (err != ESP_OK) return err;
+    if (gpio_config(&conf_dout) != ESP_OK) return err;
     
     gpio_set_level(sensor->pin_sck, 0);
 
-    is_initialized = true;
+    for(int i=0; i<ARR_AVG_SIZE; i++) {
+        sensor->arr_avg[i] = 0; 
+    }
+    sensor->is_buffer_full = false;
+    sensor->head_index = 0;
+    sensor->is_ready = true;
+    sensor->is_human_detected = false;
     return ESP_OK;
 }
 
-int32_t loadcell_read_raw(loadcell_t *sensor){
-    uint8_t timeout = 0;
-    if (!is_initialized) return LC_ERROR_CODE;
+int32_t loadcell_read_raw(loadcell_t const *sensor) {
+    if (!sensor->is_ready) return LC_ERROR_CODE;
 
-    while (gpio_get_level(sensor->pin_dout) == 1) {
-        timeout++;
-        vTaskDelay(pdMS_TO_TICKS(1));
-        if(timeout == TIME_OUT){
-            raw_value = LC_ERROR_CODE;
-            return raw_value;
-        }
-    }
-
-    raw_value = 0;
-    for (int i = 0; i < 24; i++){
-        raw_value <<= 1; 
-
-        gpio_set_level(sensor->pin_sck, 1);
-        ets_delay_us(2);
-
-        if (gpio_get_level(sensor->pin_dout))
-            raw_value |= 1;
-
-        gpio_set_level(sensor->pin_sck, 0);
-        ets_delay_us(2);
-    }
-
-    gpio_set_level(sensor->pin_sck, 1);
-    ets_delay_us(2);
-    gpio_set_level(sensor->pin_sck, 0);
-
-    if(raw_value & (1 << 23)){
-    raw_value |= HX711_SIGN_MASK;
-    }
-
-    return raw_value;
-
-}
-void avg_cal_started(loadcell_t *sensor){
-    int32_t sum = 0;
     int32_t raw = 0;
-    uint8_t count = 0;
-    while(count < AVG_STARTED){
-        raw = loadcell_read_raw(sensor);
-        if(raw > LC_ERROR_CODE){
-            count++;
-            sum += raw;
+    uint16_t timeout = 0;
+
+    // Chờ dữ liệu sẵn sàng
+    while (gpio_get_level(sensor->pin_dout) == 1) {
+        vTaskDelay(pdMS_TO_TICKS(1)); 
+        timeout++;
+        if (timeout > TIME_OUT) {
+            return LC_ERROR_CODE;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
-    sensor->offset = sum / count;
+    // Đọc 24 bit
+    portDISABLE_INTERRUPTS(); 
+    
+    for (int i = 0; i < 24; i++) {
+        gpio_set_level(sensor->pin_sck, 1);
+        ets_delay_us(1);
+        
+        raw = raw << 1;
+        
+        if (gpio_get_level(sensor->pin_dout)) {
+            raw |= 1;
+        }
+        
+        gpio_set_level(sensor->pin_sck, 0);
+        ets_delay_us(1);
+    }
+
+    // Xung thứ 25 (Gain 128, Channel A)
+    gpio_set_level(sensor->pin_sck, 1);
+    ets_delay_us(1);
+    gpio_set_level(sensor->pin_sck, 0);
+    ets_delay_us(1);
+    
+    portENABLE_INTERRUPTS();
+
+    // Xử lý dấu (two's complement)
+    if (raw & (1<<23)) {
+        raw |= HX711_SIGN_MASK;
+    }
+    return raw;
+}
+esp_err_t loadcell_read_average(loadcell_t *sensor, uint8_t times) {
+    if (times < 1) times = 1;
+    
+    int32_t sum = 0;
+    uint8_t valid_count = 0;
+    
+    for (uint8_t i = 0; i < times; i++) {
+        int32_t raw = loadcell_read_raw(sensor);
+        
+        if (raw != LC_ERROR_CODE) {
+            sum += raw;
+            valid_count++;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(12)); // Chờ mẫu mới
+    }
+
+    if (valid_count == 0) return ESP_FAIL;
+    
+    sensor->offset = (int32_t)(sum / valid_count);
+
+    return ESP_OK;
 }
 
-uint16_t get_weight(loadcell_t *sensor){
+int32_t get_weight(loadcell_t *sensor) {
     int32_t raw = loadcell_read_raw(sensor);
-    uint16_t weight = (raw - sensor->offset) / SCALE_FACTOR;
+    
+    if (raw == LC_ERROR_CODE) return LC_ERROR_CODE;
+
+    // Logic: (Raw - Offset) / Scale của RIÊNG cảm biến đó
+    int32_t weight = (raw - sensor->offset) / sensor->scale_factor;
+    
     return weight;
-}*/
-#include <stdint.h>
+}
+
+int32_t get_smooth_weight(loadcell_t *sensor, int32_t new_weight){
+    int32_t sum = 0;
+
+    sensor->arr_avg[sensor->head_index] = new_weight;
+    sensor->head_index++;
+
+    if(sensor->head_index >= ARR_AVG_SIZE){
+        sensor->is_buffer_full = true;
+        sensor->head_index = 0;
+    } 
+
+    uint8_t count = sensor->is_buffer_full ? ARR_AVG_SIZE : sensor->head_index;
+
+    if(count==0) return new_weight;
+
+    for (int i = 0; i < count; i++ ){
+        sum += sensor->arr_avg[i];
+    }
+    return sum / count;
+}
+
+
+
+
+/*#include <stdint.h>
 #include <stdlib.h>
 #include "esp_timer.h"
 #include "driver/gpio.h"
@@ -314,4 +363,4 @@ void loadcell_debug_print(loadcell_t *sensor) {
     
     ESP_LOGI(TAG, "RAW: %ld | OFFSET: %ld | VALUE: %ld | SCALE: %.2f | WEIGHT: %.2f g",
              raw, sensor->offset, value, sensor->scale_factor, weight);
-}
+}*/
