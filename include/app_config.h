@@ -36,6 +36,30 @@ extern "C" {
 #define PD_SCK_FRONT 17
 #define DOUT_FRONT 18
 
+#define PD_SCK_LEFT  15
+#define DOUT_LEFT    16
+
+#define PD_SCK_RIGHT 7
+#define DOUT_RIGHT   6
+
+// ==========================================================
+// 3. LOADCELL CALIBRATION VALUES
+// Run CALIBRATION_MODE to obtain these values
+// ==========================================================
+#define SCALE_FRONT   1.0f    // TODO: Replace with actual value after calibration
+#define SCALE_LEFT    1.0f    // TODO: Replace with actual value after calibration  
+#define SCALE_RIGHT   1.0f    // TODO: Replace with actual value after calibration
+
+// Operation Mode Control
+// 1: Run Calibration Wizard (Blocks normal operation to find scale factors)
+// 0: Normal Rescue Mode (Runs detection logic with current config)
+#define CALIBRATION_MODE        1
+
+// Reference Weight for Calibration
+// Unit: Grams (g)
+// MUST match the exact weight of the object placed on sensors during calibration
+#define CALIBRATION_WEIGHT_G    199.0f
+
 // ==========================================================
 // 2. POWER SYSTEM (2S LiPo)
 #define BATTERY_MAX_V   8.4f  ///< Fully charged (4.2V/cell × 2)
@@ -46,8 +70,8 @@ extern "C" {
 
 
 // Motor Speed Scale
-// Quy ước: 1.00% = 100 units.
-// Ví dụ: Muốn chạy 50.5%, truyền vào 5050.
+// Convention: 1.00% = 100 units
+// Example: 50.5% speed = 5050
 #define MOTOR_SCALE_FACTOR      100
 #define MOTOR_SPEED_MAX_RAW     (100 * MOTOR_SCALE_FACTOR) // = 10000
 

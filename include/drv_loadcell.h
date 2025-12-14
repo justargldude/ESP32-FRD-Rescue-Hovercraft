@@ -24,7 +24,6 @@ extern "C" {
         CONFIGURATION CONSTANT
   ----------------------------------------*/
 
-
 // Hardware & Protocol
 #define HX711_SIGN_MASK         0xFF000000      // Mask for 24-bit two's complement extension
 #define LC_ERROR_CODE           -2147483648     // INT32_MIN as error indicator
@@ -42,7 +41,7 @@ extern "C" {
 
 // Logic Timing
 #define COUNTER_DETECT_REQ      5               // Consecutive samples required to confirm human presence
-#define COLLISION_COOLDOWN_MS   500             // Cooldown after collision detection (prevent retriggering)
+#define COLLISION_COOLDOWN_MS   400             // Cooldown after collision detection (prevent retriggering)
 
 /*----------------------------------------
             DATA STRUCTURES
@@ -73,8 +72,7 @@ typedef struct {
     bool is_human_detected;     // Output flag: True if human is confirmed
 
     // Collision Detection Logic 
-    // Note: Uses RAW values (not smoothed) to preserve spike signals
-    int32_t last_raw_weight;        // RAW weight from previous cycle (not smoothed!)
+    int32_t last_raw_weight;        // RAW weight from previous cycle
     bool is_collision_detected;     // True if impact detected
     int64_t last_collision_time_us; // Timestamp of last collision (for cooldown)
 } loadcell_t;
@@ -137,6 +135,49 @@ void logic_detect_human(loadcell_t *left_sensor, loadcell_t *right_sensor);
  * * @param front_sensor Pointer to Front Loadcell
  */
 void logic_detect_collision(loadcell_t *front_sensor);
+
+/*----------------------------------------
+        CALIBRATION UTILITIES
+  ----------------------------------------*/
+
+/**
+ * @brief Tare (Zero) the loadcell
+ * * Reads multiple samples and sets the offset to current value.
+ * Call this when sensor has NO load.
+ * @param sensor Pointer to loadcell_t struct
+ * @return ESP_OK on success, ESP_FAIL on sensor error
+ */
+esp_err_t loadcell_tare(loadcell_t *sensor);
+
+/**
+ * @brief Calibrate scale_factor with known weight
+ * * Process:
+ * 1. Tare first (no load)
+ * 2. Place known weight
+ * 3. Call this function
+ * * @param sensor Pointer to loadcell_t struct
+ * @param known_weight_grams Weight of calibration object (in grams)
+ * @return Calculated scale_factor (save this to your config!)
+ */
+float loadcell_calibrate(loadcell_t *sensor, float known_weight_grams);
+
+/**
+ * @brief Interactive calibration for all 3 sensors
+ * * Guides user through calibration process via Serial (ESP_LOG).
+ * Prints scale_factor values to copy into code.
+ * * @param front Front loadcell
+ * @param left Left loadcell  
+ * @param right Right loadcell
+ * @param known_weight_grams Weight of calibration object
+ */
+void loadcell_calibrate_all(loadcell_t *front, loadcell_t *left, loadcell_t *right, float known_weight_grams);
+
+/**
+ * @brief Debug print raw values (for testing)
+ * @param sensor Pointer to loadcell_t struct
+ * @param sensor_name Name to display in log
+ */
+void loadcell_debug_print(loadcell_t *sensor, const char *sensor_name);
 
 #ifdef __cplusplus
 }

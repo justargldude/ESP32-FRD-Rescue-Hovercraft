@@ -14,6 +14,8 @@
 #include "app_config.h"
 #include "drv_loadcell.h"
 
+static const char *TAG = "LOADCELL_CAL";
+
 // DRIVER IMPLEMENTATION
 
 esp_err_t loadcell_init(loadcell_t *sensor) {
@@ -280,3 +282,108 @@ void logic_detect_collision(loadcell_t *front_sensor) {
     front_sensor->last_raw_weight = raw;
 }
 
+
+/*----------------------------------------
+        CALIBRATION UTILITIES
+  ----------------------------------------*/
+
+esp_err_t loadcell_tare(loadcell_t *sensor) {
+    vTaskDelay(pdMS_TO_TICKS(300));
+    esp_err_t ret = loadcell_read_average_raw(sensor, LC_TARE_SAMPLES);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Tare FAILED");
+    }
+    return ret;
+}
+
+float loadcell_calibrate(loadcell_t *sensor, float known_weight_grams) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // Read multiple samples for stability
+    int32_t sum = 0;
+    uint8_t valid = 0;
+    
+    for (int i = 0; i < 20; i++) {
+        int32_t raw = loadcell_read_raw(sensor);
+        if (raw != LC_ERROR_CODE) {
+            sum += raw;
+            valid++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    
+    if (valid == 0) {
+        ESP_LOGE(TAG, "Cal FAILED - no readings");
+        return 0.0f;
+    }
+    
+    int32_t raw_with_load = sum / valid;
+    int32_t delta = raw_with_load - sensor->offset;
+    
+    if (delta == 0) {
+        ESP_LOGE(TAG, "Cal FAILED - delta=0");
+        return 0.0f;
+    }
+    
+    float scale = (float)delta / known_weight_grams;
+    ESP_LOGW(TAG, "SCALE = %.4f", scale);
+    
+    sensor->scale_factor = scale;
+    return scale;
+}
+
+void loadcell_calibrate_all(loadcell_t *front, loadcell_t *left, loadcell_t *right, float known_weight_grams) {
+    float scale_front = 0, scale_left = 0, scale_right = 0;
+    
+    ESP_LOGW(TAG, "--- CALIBRATION (%.0fg) ---", known_weight_grams);
+    
+    // --- FRONT SENSOR ---
+    ESP_LOGW(TAG, "[1/3] FRONT - Remove weight");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    
+    if (loadcell_tare(front) == ESP_OK) {
+        ESP_LOGW(TAG, "[1/3] FRONT - Place weight");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        scale_front = loadcell_calibrate(front, known_weight_grams);
+    }
+    
+    // --- LEFT SENSOR ---
+    ESP_LOGW(TAG, "[2/3] LEFT - Remove weight");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    
+    if (loadcell_tare(left) == ESP_OK) {
+        ESP_LOGW(TAG, "[2/3] LEFT - Place weight");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        scale_left = loadcell_calibrate(left, known_weight_grams);
+    }
+    
+    // --- RIGHT SENSOR ---
+    ESP_LOGW(TAG, "[3/3] RIGHT - Remove weight");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    
+    if (loadcell_tare(right) == ESP_OK) {
+        ESP_LOGW(TAG, "[3/3] RIGHT - Place weight");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        scale_right = loadcell_calibrate(right, known_weight_grams);
+    }
+    
+    // --- SUMMARY ---
+    ESP_LOGW(TAG, "DONE");
+    ESP_LOGW(TAG, "SCALE_FRONT = %.4f", scale_front);
+    ESP_LOGW(TAG, "SCALE_LEFT  = %.4f", scale_left);
+    ESP_LOGW(TAG, "SCALE_RIGHT = %.4f", scale_right);
+}
+
+void loadcell_debug_print(loadcell_t *sensor, const char *sensor_name) {
+    int32_t raw = loadcell_read_raw(sensor);
+    
+    if (raw == LC_ERROR_CODE) {
+        ESP_LOGE(TAG, "[%s] ERR", sensor_name);
+        return;
+    }
+    
+    int32_t value = raw - sensor->offset;
+    float weight = (sensor->scale_factor != 0) ? (float)value / sensor->scale_factor : 0;
+    
+    ESP_LOGI(TAG, "[%s] W:%.1fg", sensor_name, weight);
+}
